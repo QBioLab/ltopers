@@ -6,11 +6,11 @@
 
 SCRIPTDIR=$(dirname "${0}")
 . "${SCRIPTDIR}/mmfunctions" || { echo "Missing '${SCRIPTDIR}/mmfunctions'. Exiting." ; exit 1 ; }
-DEPENDENCIES=(gcp mmfunctions)
-TAPE_MOUNT_POINT="/Volumes"
+DEPENDENCIES=(gcp)
+TAPE_MOUNT_POINT="/mnt"
 TAPE_SERIAL_REGEX="^[A-Z0-9]{6}$"
 unset HIDDEN_FILES
-TAPE_EJECT="Y"
+TAPE_EJECT="N" # don't eject tape
 _check_for_lto_index_dir
 LTO_LOGS="${LTO_INDEX_DIR}"
 
@@ -89,70 +89,44 @@ fi
 
 _checkdir "${TAPE_PATH}"
 
-gcp --preserve=mode,timestamps -nRv "${SOURCE_DIR}/"* "${TAPE_PATH}"
+gcp --preserve=mode,timestamps -nRv "${SOURCE_DIR}" "${TAPE_PATH}"
 
-"${SCRIPTDIR}/migratefiles" -o "${TAPE_PATH}" "${SOURCE_DIR}/"
+"${SCRIPTDIR}/migratefiles" -o "${TAPE_PATH}/$(basename -- ${SOURCE_DIR})" "${SOURCE_DIR}/"
 RSYNC_ERR_1="$?"
-HIDDEN_FILES=$(find "${TAPE_PATH}" -name ".*")
-if [[ "${HIDDEN_FILES}" ]] ; then
-    echo "Removing hidden files from tape."
-    find "${TAPE_PATH}" -name ".*" -delete
-    "${SCRIPTDIR}/migratefiles" -o "${TAPE_PATH}" "${SOURCE_DIR}/"
-    RSYNC_ERR_2="$?"
-fi
 
 WRITELTODIR="${LTO_LOGS}/writelto"
 _mkdir2 "${WRITELTODIR}"
 
 if [ -n "$RSYNC_ERR_2" ] ; then
-    echo "rsync exited with ${RSYNC_ERR_1} on the first pass and ${RSYNC_ERR_2} on the second pass." | tee -a "${WRITELTODIR}/${TAPE_SERIAL}_writelto.txt" 2>&1
+    echo "rsync exited with ${RSYNC_ERR_1} on the first pass" | tee -a "${WRITELTODIR}/${TAPE_SERIAL}_writelto.txt" 2>&1
 else
     echo "rsync exited with ${RSYNC_ERR_1}." | tee -a "${WRITELTODIR}/${TAPE_SERIAL}_writelto.txt" 2>&1
 fi
 
-if [[ "${PREMIS_DB}" = "Y" ]] ; then
-    _report_to_db
-fi
-
 _check_for_lto_md5_flags
+READBACKOUTPUT=""
 if [[ "${VERIFY}" = "Y" ]] ; then
     VERIFYTIME=$(_get_iso8601_c)
     READBACKDIR="${LTO_LOGS}/readback_checksums"
     _mkdir2 "${READBACKDIR}"
     find "${TAPE_PATH}" -type f ! -name .DS_Store -exec $LTO_MD5_FLAGS "{}" >> "${READBACKDIR}/${TAPE_SERIAL}_ReadBack_checksum_${VERIFYTIME}.md5" \;
+    READBACKOUTPUT="${READBACKDIR}/${TAPE_SERIAL}_ReadBack_checksum_${VERIFYTIME}.md5"
+    sort -k 2 -o "${READBACKOUTPUT}" "${READBACKOUTPUT}"
+    printf "\nreadback checksums written to:\n\t%s" "${READBACKOUTPUT}"
+    #TODO: update in upstream
 fi
 
-READBACKOUTPUT="${READBACKDIR}/${TAPE_SERIAL}_ReadBack_checksum_${VERIFYTIME}.md5"
-sort -k 2 -o "${READBACKOUTPUT}" "${READBACKOUTPUT}"
 
 echo -n "$(date +%FT%T) " >> "${LTO_LOGS}/tape_capacity.txt"
 echo $(df -Ph "${TAPE_PATH}" | tail -n 1) >> "${LTO_LOGS}/tape_capacity.txt"
 
-renameschemas -u
+./renameschemas -u
 SCHEMA_FILE="${LTO_LOGS}/schema/${TAPE_SERIAL}.schema"
 
 printf "\nrsync error report written to:\n\t%s/%s_writelto.txt" "${WRITELTODIR}" "${TAPE_SERIAL}"
-printf "\nreadback checksums written to:\n\t%s" "${READBACKOUTPUT}"
 printf "\nafter ejecting tape, lto schema file written to:\n\t%s\n\n" "${SCHEMA_FILE}"
 
 case "${TAPE_EJECT}" in
     y|Y) umount "${TAPE_PATH}" ;;
     *)   echo "Done writing but not ejecting ${TAPE_SERIAL}." ;;
 esac
-
-if [[ "${PREMIS_DB}" = "Y" ]] ; then
-    _eventoutcome_update
-    _report_fixity_db
-    _report_schema_db
-    _db_email_delivery "${SQL_ERROR_EMAIL_TO}"
-    if [[ "${VERIFY}" = "Y" ]] ; then
-        VERIFY_CHECK="Y"
-        unset db_fixity
-        db_fixity=$(cat "${READBACKDIR}/${TAPE_SERIAL}_ReadBack_checksum_${VERIFYTIME}.md5")
-        if [ -z "${db_fixity}" ] ; then
-            event_outcome="No fixity information"
-        fi
-        _report_fixity_db
-        _db_email_delivery "${SQL_ERROR_EMAIL_TO}"
-    fi
-fi

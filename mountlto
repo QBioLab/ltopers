@@ -3,7 +3,7 @@
 # mountlto
 
 SCRIPTDIR=$(dirname "${0}")
-DEPENDENCIES=(ltfs mmfunctions)
+DEPENDENCIES=(ltfs)
 MINIMUM_TAPE_SERIAL_LENGTH=2
 
 . "${SCRIPTDIR}/mmfunctions" || { echo "Missing '${SCRIPTDIR}/mmfunctions'. Exiting." ; exit 1 ; }
@@ -26,10 +26,12 @@ if [[ "$(uname -s)" = "Darwin" ]] ; then
 else
     # TO DO: itemize when there are multiple LTO drives in Linux and Windows
     LTO_COUNT=1
+    #LTO_COUNT="/dev/sg13"
 fi
 
 if [[ "${LTO_COUNT}" -eq 0 ]] ; then
     _report -w "No LTO decks were found."
+    echo "No LTO decks were found."
     exit 1
 fi
 
@@ -38,7 +40,8 @@ fi
 _report -d "Checking for ready tapes..."
 
 for i in $(seq 1 "${LTO_COUNT}") ; do
-    DECK=$(echo "$i - 1" | bc)
+    #DECK=$(echo "$i - 1" | bc)
+    DECK=/dev/sg13
     if [ $(command -v ltfs_ldun) ] ; then
         ltfs_ldun load ${DECK} 1>/dev/null
     fi
@@ -79,12 +82,12 @@ for i in $(seq 1 "${LTO_COUNT}") ; do
         LTFS_OPTIONS+=(-o noatime)
         LTFS_OPTIONS+=(-o capture_index)
         LTFS_OPTIONS+=(-o devname=${DECK})
-        LTFS_OPTIONS+=(-o volname="${TAPE_SERIAL}")
+        #LTFS_OPTIONS+=(-o volname="${TAPE_SERIAL}")
         LTFS_OPTIONS+=(-o uid=$(id -u))
 
         ltfs -f -o work_directory="${LTO_LOGS}" ${LTFS_OPTIONS[@]} "${MOUNT_DIR}"
         [[ -d "${MOUNT_DIR}" ]] && rmdir "${MOUNT_DIR}"
-        renameschemas -u
+        ./renameschemas -u
         break
     fi
     if [[ "$i" -eq "${LTO_COUNT}" ]] ; then

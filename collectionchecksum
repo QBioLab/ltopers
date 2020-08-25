@@ -8,7 +8,7 @@
 
 SCRIPTDIR=$(dirname "${0}")
 
-. "${SCRIPTDIR}/mmfunctions" || { echo "Missing '${SCRIPTDIR}/mmfunctions'. Exiting." ; exit 1 ; }
+#. "${SCRIPTDIR}/mmfunctions" || { echo "Missing '${SCRIPTDIR}/mmfunctions'. Exiting." ; exit 1 ; }
 
 _maketemp(){
     mktemp -q "/tmp/$(basename "${0}").XXXXXX"
